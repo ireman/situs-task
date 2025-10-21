@@ -119,6 +119,23 @@ class BeverageForecaster:
         df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
         df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
 
+        # NEW FEATURES
+        print("Creating product-specific features...")
+
+        # 1. is_diet: Binary feature for diet/zero calorie beverages
+        diet_keywords = ['diet', 'zero', 'lite']
+        df['is_diet'] = df['beverage'].str.lower().apply(
+            lambda x: 1 if any(keyword in x for keyword in diet_keywords) else 0
+        )
+
+        # 2. holiday: Binary feature for months with major holidays
+        # December (Christmas), January (New Year), November (Thanksgiving)
+        df['holiday'] = df['month'].apply(lambda x: 1 if x in [11, 12, 1] else 0)
+
+        print(f"  - is_diet: {df['is_diet'].sum()} diet/zero products")
+        print(f"  - holiday: Months {[11, 12, 1]} marked as holiday months")
+        print(f"  - quarter: Q1-Q4 based on month")
+
         # Encode beverage names
         df['beverage_encoded'] = self.label_encoder.fit_transform(df['beverage'])
 
@@ -170,10 +187,11 @@ class BeverageForecaster:
         # Prepare training data (all 2018-2020 data)
         train_data = self.processed_data.copy()
 
-        # Features for modeling
+        # Features for modeling (including new features: is_diet, quarter, holiday)
         feature_cols = [
             'beverage_encoded', 'time_idx', 'month_num', 'quarter',
             'month_sin', 'month_cos',
+            'is_diet', 'holiday',  # NEW FEATURES
             'lag_1', 'lag_2', 'lag_3', 'lag_6', 'lag_12',
             'rolling_mean_3', 'rolling_mean_6', 'rolling_mean_12',
             'rolling_std_3', 'rolling_std_6', 'rolling_std_12'
@@ -277,6 +295,7 @@ class BeverageForecaster:
         feature_cols = [
             'beverage_encoded', 'time_idx', 'month_num', 'quarter',
             'month_sin', 'month_cos',
+            'is_diet', 'holiday',  # NEW FEATURES
             'lag_1', 'lag_2', 'lag_3', 'lag_6', 'lag_12',
             'rolling_mean_3', 'rolling_mean_6', 'rolling_mean_12',
             'rolling_std_3', 'rolling_std_6', 'rolling_std_12'
@@ -313,6 +332,11 @@ class BeverageForecaster:
 
                 # Build features
                 min_date = self.processed_data['date'].min()
+
+                # Determine is_diet based on beverage name
+                diet_keywords = ['diet', 'zero', 'lite']
+                is_diet = 1 if any(keyword in beverage.lower() for keyword in diet_keywords) else 0
+
                 features = {
                     'beverage_encoded': self.label_encoder.transform([beverage])[0],
                     'time_idx': ((current_row['year'] - min_date.year) * 12 +
@@ -321,6 +345,8 @@ class BeverageForecaster:
                     'quarter': (current_row['month'] - 1) // 3 + 1,
                     'month_sin': np.sin(2 * np.pi * current_row['month'] / 12),
                     'month_cos': np.cos(2 * np.pi * current_row['month'] / 12),
+                    'is_diet': is_diet,
+                    'holiday': 1 if current_row['month'] in [11, 12, 1] else 0,
                 }
 
                 # Lag features
@@ -491,6 +517,10 @@ class BeverageForecaster:
                 # Create features for current forecast point
                 current_row = beverage_data.iloc[i]
 
+                # Determine is_diet based on beverage name
+                diet_keywords = ['diet', 'zero', 'lite']
+                is_diet = 1 if any(keyword in current_row['beverage'].lower() for keyword in diet_keywords) else 0
+
                 features = {
                     'beverage_encoded': self.label_encoder.transform([current_row['beverage']])[0],
                     'time_idx': (
@@ -501,6 +531,8 @@ class BeverageForecaster:
                     'quarter': (current_row['month'] - 1) // 3 + 1,
                     'month_sin': np.sin(2 * np.pi * current_row['month'] / 12),
                     'month_cos': np.cos(2 * np.pi * current_row['month'] / 12),
+                    'is_diet': is_diet,
+                    'holiday': 1 if current_row['month'] in [11, 12, 1] else 0,
                 }
 
                 # Lag features
@@ -523,6 +555,7 @@ class BeverageForecaster:
                 feature_cols = [
                     'beverage_encoded', 'time_idx', 'month_num', 'quarter',
                     'month_sin', 'month_cos',
+                    'is_diet', 'holiday',  # NEW FEATURES
                     'lag_1', 'lag_2', 'lag_3', 'lag_6', 'lag_12',
                     'rolling_mean_3', 'rolling_mean_6', 'rolling_mean_12',
                     'rolling_std_3', 'rolling_std_6', 'rolling_std_12'

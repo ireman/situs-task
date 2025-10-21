@@ -64,8 +64,6 @@ class BeverageForecaster:
         print("EXPLORATORY DATA ANALYSIS")
         print("=" * 80)
 
-        # Identify beverage column and quantity column
-        # Common patterns: 'beverage', 'product', 'item', 'quantity', 'orders', 'amount'
         print(f"\nUnique values per column:")
         for col in self.data.columns:
             n_unique = self.data[col].nunique()
@@ -74,66 +72,14 @@ class BeverageForecaster:
                 print(f"    Values: {sorted(self.data[col].unique())[:10]}")
 
         # Analyze beverage types
-        beverage_col = self._identify_beverage_column()
-        if beverage_col:
-            print(f"\nBeverage types found: {self.data[beverage_col].nunique()}")
-            print(f"Beverages: {sorted(self.data[beverage_col].unique())}")
+        print(f"\nBeverage types found: {self.data['Name'].nunique()}")
+        print(f"Beverages: {sorted(self.data['Name'].unique())}")
 
         # Analyze time range
-        year_col = self._identify_year_column()
-        month_col = self._identify_month_column()
-
-        if year_col and month_col:
-            print(f"\nTime range: {self.data[year_col].min()}-{self.data[year_col].max()}")
-            print(f"Months covered: {sorted(self.data[month_col].unique())}")
+        print(f"\nTime range: {self.data['Year'].min()}-{self.data['Year'].max()}")
+        print(f"Months covered: {sorted(self.data['Month'].unique())}")
 
         return self.data
-
-    def _identify_beverage_column(self):
-        """Identify the column containing beverage names."""
-        # First, check for exact match "Name"
-        if 'Name' in self.data.columns:
-            return 'Name'
-
-        possible_names = ['beverage', 'product', 'item', 'drink', 'name']
-        for col in self.data.columns:
-            if any(name in col.lower() for name in possible_names):
-                return col
-        # If not found by name, look for object/string column with moderate unique values
-        # Exclude columns like 'Unnamed: 0' which are likely indices
-        for col in self.data.columns:
-            if (self.data[col].dtype == 'object' and
-                5 <= self.data[col].nunique() <= 100 and
-                'unnamed' not in col.lower()):
-                return col
-        return None
-
-    def _identify_year_column(self):
-        """Identify the column containing year information."""
-        for col in self.data.columns:
-            if 'year' in col.lower():
-                return col
-        return None
-
-    def _identify_month_column(self):
-        """Identify the column containing month information."""
-        for col in self.data.columns:
-            if 'month' in col.lower():
-                return col
-        return None
-
-    def _identify_quantity_column(self):
-        """Identify the column containing order quantities."""
-        possible_names = ['quantity', 'amount', 'order', 'count', 'total', 'qty']
-        for col in self.data.columns:
-            if any(name in col.lower() for name in possible_names):
-                if self.data[col].dtype in ['int64', 'float64']:
-                    return col
-        # If not found by name, look for numeric column
-        numeric_cols = self.data.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            return numeric_cols[-1]  # Return last numeric column
-        return None
 
     def preprocess_data(self):
         """Preprocess and feature engineer the data."""
@@ -141,27 +87,13 @@ class BeverageForecaster:
         print("DATA PREPROCESSING & FEATURE ENGINEERING")
         print("=" * 80)
 
-        # Identify key columns
-        beverage_col = self._identify_beverage_column()
-        year_col = self._identify_year_column()
-        month_col = self._identify_month_column()
-        qty_col = self._identify_quantity_column()
-
-        print(f"\nIdentified columns:")
-        print(f"  Beverage: {beverage_col}")
-        print(f"  Year: {year_col}")
-        print(f"  Month: {month_col}")
-        print(f"  Quantity: {qty_col}")
-
-        # Create a working copy
+        # Create a working copy and use standardized column names
         df = self.data.copy()
-
-        # Standardize column names
         df = df.rename(columns={
-            beverage_col: 'beverage',
-            year_col: 'year',
-            month_col: 'month',
-            qty_col: 'quantity'
+            'Name': 'beverage',
+            'Year': 'year',
+            'Month': 'month',
+            'Quantity': 'quantity'
         })
 
         # Create datetime column

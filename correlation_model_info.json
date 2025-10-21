@@ -1,0 +1,134 @@
+{
+  "correlation_groups": {
+    "Coca Cola Zero 500ml": [
+      "Diet Coca Cola 500ml",
+      "Coca Cola Classic 500ml"
+    ],
+    "Diet Coca Cola 500ml": [
+      "Coca Cola Zero 500ml",
+      "Coca Cola Classic 500ml"
+    ],
+    "Coca Cola Classic 500ml": [
+      "Coca Cola Zero 500ml",
+      "Diet Coca Cola 500ml"
+    ],
+    "Grape 500ml": [
+      "Grapefruit 500ml"
+    ],
+    "Grapefruit 500ml": [
+      "Grape 500ml"
+    ]
+  },
+  "families": {
+    "Coca Cola": [
+      "Coca Cola Classic 500ml",
+      "Coca Cola Zero 500ml",
+      "Diet Coca Cola 500ml"
+    ],
+    "Sprite": [
+      "Sprite 500ml",
+      "Zero Sprite 500ml",
+      "sprite lite"
+    ],
+    "Fuze": [
+      "Fuze Diet Apricot 500ml",
+      "Fuze Tea Apricot 500ml"
+    ],
+    "Fruit": [
+      "Grape 500ml",
+      "Grapefruit 500ml"
+    ],
+    "Other": [
+      "Fanta 500ml"
+    ]
+  },
+  "baseline_performance": {
+    "MAE": 1.3837162392861047,
+    "RMSE": 2.80953140703746,
+    "R2": 0.9647894857673371
+  },
+  "enhanced_performance": {
+    "MAE": 1.472040898548771,
+    "RMSE": 2.8854654741289694,
+    "R2": 0.9628604746198578
+  },
+  "per_beverage": [
+    {
+      "Beverage": "Sprite 500ml",
+      "Baseline MAE": 2.173826298701299,
+      "Enhanced MAE": 1.9596239177489179,
+      "Improvement %": 9.853702712141772,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "Grapefruit 500ml",
+      "Baseline MAE": 0.4452278543016428,
+      "Enhanced MAE": 0.41538708171977523,
+      "Improvement %": 6.702359767825842,
+      "Has Corr Features": "\u2713"
+    },
+    {
+      "Beverage": "Diet Coca Cola 500ml",
+      "Baseline MAE": 0.9961691117524446,
+      "Enhanced MAE": 0.9769405717739049,
+      "Improvement %": 1.9302485643941665,
+      "Has Corr Features": "\u2713"
+    },
+    {
+      "Beverage": "Grape 500ml",
+      "Baseline MAE": 0.4283067314406515,
+      "Enhanced MAE": 0.42057309823247657,
+      "Improvement %": 1.8056296201934787,
+      "Has Corr Features": "\u2713"
+    },
+    {
+      "Beverage": "Zero Sprite 500ml",
+      "Baseline MAE": 1.3687422980296757,
+      "Enhanced MAE": 1.3692384698944946,
+      "Improvement %": -0.03625020323643972,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "sprite lite",
+      "Baseline MAE": 0.49183087907663253,
+      "Enhanced MAE": 0.4946393384263907,
+      "Improvement %": -0.5710213549484281,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "Fuze Diet Apricot 500ml",
+      "Baseline MAE": 1.6635727273770744,
+      "Enhanced MAE": 1.6799644433509362,
+      "Improvement %": -0.9853320930372744,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "Fuze Tea Apricot 500ml",
+      "Baseline MAE": 0.9866862867071196,
+      "Enhanced MAE": 0.9973693587043044,
+      "Improvement %": -1.0827222533757541,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "Fanta 500ml",
+      "Baseline MAE": 0.4276659838891379,
+      "Enhanced MAE": 0.44766921427285716,
+      "Improvement %": -4.677302179100739,
+      "Has Corr Features": "\u2717"
+    },
+    {
+      "Beverage": "Coca Cola Classic 500ml",
+      "Baseline MAE": 3.257804443241948,
+      "Enhanced MAE": 3.51922414853665,
+      "Improvement %": -8.024413676425418,
+      "Has Corr Features": "\u2713"
+    },
+    {
+      "Beverage": "Coca Cola Zero 500ml",
+      "Baseline MAE": 3.722669422398588,
+      "Enhanced MAE": 4.356651848922684,
+      "Improvement %": -17.030317618576227,
+      "Has Corr Features": "\u2713"
+    }
+  ]
+}

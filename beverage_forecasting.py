@@ -238,14 +238,158 @@ class BeverageForecaster:
 
         return self.models
 
+    def forecast_hierarchical(self, family_name, family_beverages, future_dates):
+        """
+        Hierarchical forecasting: Forecast each product, then reconcile using proportions.
+
+        This approach:
+        1. Forecasts each family member individually
+        2. Sums to get bottom-up family total
+        3. Adjusts individual forecasts to match historical proportions
+
+        Args:
+            family_name: Name of the product family
+            family_beverages: List of beverage names in the family
+            future_dates: DataFrame with year and month columns
+
+        Returns:
+            DataFrame with forecasts for all beverages in the family
+        """
+        print(f"\n  Using HIERARCHICAL FORECASTING (bottom-up with reconciliation) for {family_name}")
+
+        # Step 1: Calculate historical proportions
+        family_hist = self.processed_data[
+            self.processed_data['beverage'].isin(family_beverages)
+        ].copy()
+
+        total_by_beverage = family_hist.groupby('beverage')['quantity'].sum()
+        proportions = total_by_beverage / total_by_beverage.sum()
+
+        print(f"  Historical proportions:")
+        for bev, prop in proportions.items():
+            print(f"    {bev:30s}: {prop:.1%}")
+
+        # Step 2: Forecast each beverage individually using standard method
+        print(f"  Forecasting each product individually...")
+        individual_forecasts = []
+
+        model = self.models['random_forest']
+        feature_cols = [
+            'beverage_encoded', 'time_idx', 'month_num', 'quarter',
+            'month_sin', 'month_cos',
+            'lag_1', 'lag_2', 'lag_3', 'lag_6', 'lag_12',
+            'rolling_mean_3', 'rolling_mean_6', 'rolling_mean_12',
+            'rolling_std_3', 'rolling_std_6', 'rolling_std_12'
+        ]
+
+        for beverage in family_beverages:
+            # Get historical data
+            hist_beverage = self.processed_data[
+                self.processed_data['beverage'] == beverage
+            ].copy().sort_values('date')
+
+            # Combine with future dates
+            all_dates = pd.concat([
+                hist_beverage[['beverage', 'date', 'year', 'month', 'quantity']],
+                pd.DataFrame([
+                    {
+                        'beverage': beverage,
+                        'date': pd.to_datetime(f"{row['year']}-{row['month']:02d}-01"),
+                        'year': row['year'],
+                        'month': row['month'],
+                        'quantity': np.nan
+                    }
+                    for _, row in future_dates.iterrows()
+                ])
+            ], ignore_index=True).sort_values('date').reset_index(drop=True)
+
+            # Find where forecasting starts
+            hist_end_idx = all_dates['quantity'].notna().sum()
+
+            # Iterative forecasting
+            for i in range(hist_end_idx, len(all_dates)):
+                current_quantities = all_dates['quantity'].iloc[:i].values
+                current_row = all_dates.iloc[i]
+
+                # Build features
+                min_date = self.processed_data['date'].min()
+                features = {
+                    'beverage_encoded': self.label_encoder.transform([beverage])[0],
+                    'time_idx': ((current_row['year'] - min_date.year) * 12 +
+                                (current_row['month'] - min_date.month)),
+                    'month_num': current_row['month'],
+                    'quarter': (current_row['month'] - 1) // 3 + 1,
+                    'month_sin': np.sin(2 * np.pi * current_row['month'] / 12),
+                    'month_cos': np.cos(2 * np.pi * current_row['month'] / 12),
+                }
+
+                # Lag features
+                for lag in [1, 2, 3, 6, 12]:
+                    if i >= lag:
+                        features[f'lag_{lag}'] = current_quantities[i - lag]
+                    else:
+                        features[f'lag_{lag}'] = np.median(current_quantities)
+
+                # Rolling features
+                for window in [3, 6, 12]:
+                    if i >= window:
+                        features[f'rolling_mean_{window}'] = np.mean(current_quantities[i-window:i])
+                        features[f'rolling_std_{window}'] = np.std(current_quantities[i-window:i])
+                    else:
+                        features[f'rolling_mean_{window}'] = np.mean(current_quantities[:i])
+                        features[f'rolling_std_{window}'] = np.std(current_quantities[:i]) if i > 1 else 0
+
+                # Predict
+                X_forecast = np.array([[features[col] for col in feature_cols]])
+                prediction = max(0, model.predict(X_forecast)[0])
+
+                all_dates.loc[i, 'quantity'] = prediction
+
+            # Extract forecasts for 2021-2022
+            forecasts = all_dates[all_dates['year'].isin([2021, 2022])].copy()
+            individual_forecasts.append(forecasts)
+
+        # Step 3: Combine and reconcile using proportions
+        print(f"  Reconciling forecasts to match historical proportions...")
+        all_forecasts = pd.concat(individual_forecasts, ignore_index=True)
+
+        # Calculate bottom-up totals by month
+        monthly_totals = all_forecasts.groupby(['year', 'month'])['quantity'].transform('sum')
+
+        # Adjust each beverage to match its historical proportion
+        reconciled_forecasts = []
+        for beverage in family_beverages:
+            bev_mask = all_forecasts['beverage'] == beverage
+            bev_data = all_forecasts[bev_mask].copy()
+
+            # Apply proportion to the monthly total
+            bev_data['quantity'] = monthly_totals[bev_mask] * proportions[beverage]
+
+            reconciled_forecasts.append(bev_data)
+
+        result = pd.concat(reconciled_forecasts, ignore_index=True).sort_values(['date', 'beverage'])
+        print(f"  Forecasted {len(result)} records for {family_name} family")
+
+        return result[['beverage', 'year', 'month', 'date', 'quantity']]
+
     def generate_forecasts(self):
-        """Generate forecasts for 2021-2022."""
+        """Generate forecasts for 2021-2022 using hierarchical approach for Coca Cola family."""
         print("\n" + "=" * 80)
         print("GENERATING FORECASTS FOR 2021-2022")
         print("=" * 80)
 
+        # Define product families for hierarchical forecasting
+        coca_cola_family = [
+            'Coca Cola Classic 500ml',
+            'Coca Cola Zero 500ml',
+            'Diet Coca Cola 500ml'
+        ]
+
         # Get unique beverages
-        beverages = self.processed_data['beverage'].unique()
+        all_beverages = self.processed_data['beverage'].unique()
+
+        # Separate beverages into family and non-family
+        other_beverages = [b for b in all_beverages if b not in coca_cola_family]
 
         # Prepare future dates (2021-2022)
         future_dates = []
@@ -255,10 +399,30 @@ class BeverageForecaster:
 
         future_df = pd.DataFrame(future_dates)
 
+        # ========================================================================
+        # HIERARCHICAL FORECASTING FOR COCA COLA FAMILY
+        # ========================================================================
+        print("\n" + "=" * 80)
+        print("COCA COLA FAMILY - HIERARCHICAL FORECASTING")
+        print("=" * 80)
+
+        coca_cola_forecasts = self.forecast_hierarchical(
+            family_name='Coca Cola Family',
+            family_beverages=coca_cola_family,
+            future_dates=future_df
+        )
+
+        # ========================================================================
+        # STANDARD FORECASTING FOR OTHER BEVERAGES
+        # ========================================================================
+        print("\n" + "=" * 80)
+        print("OTHER BEVERAGES - STANDARD FORECASTING")
+        print("=" * 80)
+
         # Create full forecast dataframe with all beverage-date combinations
         forecast_data = []
 
-        for beverage in beverages:
+        for beverage in other_beverages:
             print(f"\nForecasting for: {beverage}")
 
             # Get historical data for this beverage
@@ -300,9 +464,9 @@ class BeverageForecaster:
         forecast_df = pd.DataFrame(forecast_data)
 
         # Now we need to iteratively forecast and update lag features
-        print("\nIterative forecasting with lag updates...")
+        print("\nIterative forecasting with lag updates for other beverages...")
 
-        # Combine historical and future data
+        # Combine historical and future data for other beverages
         all_data = pd.concat([
             self.processed_data[['beverage', 'date', 'year', 'month', 'quantity']],
             forecast_df[['beverage', 'date', 'year', 'month']]
@@ -311,8 +475,8 @@ class BeverageForecaster:
         # Use Random Forest for final predictions (typically performs well)
         model = self.models['random_forest']
 
-        # Iterate through future dates
-        for beverage in beverages:
+        # Iterate through future dates (only for other beverages)
+        for beverage in other_beverages:
             beverage_mask = all_data['beverage'] == beverage
             beverage_data = all_data[beverage_mask].copy().reset_index(drop=True)
 
@@ -378,25 +542,41 @@ class BeverageForecaster:
             # Update all_data with forecasted values
             all_data.loc[beverage_mask, 'quantity'] = beverage_data['quantity'].values
 
-        # Extract forecasts for 2021-2022
-        forecasts = all_data[all_data['year'].isin([2021, 2022])].copy()
-        forecasts = forecasts.sort_values(['beverage', 'date'])
+        # Extract forecasts for 2021-2022 (other beverages)
+        other_forecasts = all_data[all_data['year'].isin([2021, 2022])].copy()
 
-        self.predictions['forecasts'] = forecasts
+        # Combine Coca Cola hierarchical forecasts with other beverages
+        print("\n" + "=" * 80)
+        print("COMBINING FORECASTS")
+        print("=" * 80)
+        print(f"\nCoca Cola family forecasts: {len(coca_cola_forecasts)} records")
+        print(f"Other beverages forecasts: {len(other_forecasts)} records")
 
-        print(f"\nGenerated forecasts for {len(beverages)} beverages")
-        print(f"Total forecast records: {len(forecasts)}")
+        all_forecasts = pd.concat([
+            coca_cola_forecasts,
+            other_forecasts
+        ], ignore_index=True).sort_values(['beverage', 'date'])
+
+        self.predictions['forecasts'] = all_forecasts
+
+        # Summary statistics
+        total_beverages = len(coca_cola_family) + len(other_beverages)
+        print(f"\nGenerated forecasts for {total_beverages} beverages:")
+        print(f"  - Coca Cola family (hierarchical): {len(coca_cola_family)} beverages")
+        print(f"  - Other beverages (standard): {len(other_beverages)} beverages")
+        print(f"Total forecast records: {len(all_forecasts)}")
+
         print(f"\nSample forecasts:")
-        print(forecasts.head(10))
+        print(all_forecasts.head(10))
 
         # Save forecasts to CSV
         output_file = 'beverage_forecasts_2021_2022.csv'
-        forecasts[['beverage', 'year', 'month', 'quantity']].to_csv(
+        all_forecasts[['beverage', 'year', 'month', 'quantity']].to_csv(
             output_file, index=False
         )
         print(f"\nForecasts saved to: {output_file}")
 
-        return forecasts
+        return all_forecasts
 
     def create_visualizations(self):
         """Create visualizations for historical data and forecasts."""

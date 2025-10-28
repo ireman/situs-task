@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import tensorflow as tf
 from tensorflow import keras
@@ -21,8 +21,8 @@ class LSTMBeverageForecaster:
         self.excel_path = excel_path
         self.df = None
         self.beverage_names = None
-        self.scaler_quantities = StandardScaler()
-        self.scaler_temporal = StandardScaler()
+        self.scaler_quantities = MinMaxScaler(feature_range=(0, 1))
+        self.scaler_temporal = MinMaxScaler(feature_range=(0, 1))
         self.model = None
 
         # Diet keywords for is_diet feature
@@ -79,51 +79,51 @@ class LSTMBeverageForecaster:
 
         return np.array(is_diet)
 
-    def prepare_training_data(self):
+    def prepare_training_data(self, window_size=24):
         """
-        Prepare training data:
-        - Use 2018-2019 (24 months) as historical input
-        - For each month in 2020, create a sample with different target temporal features
-        - This creates 12 training samples, all using the same 2018-2019 historical data
+        Prepare training data using rolling window approach:
+        - Use sliding window of `window_size` months to predict next month
+        - Creates multiple samples from 2018-2020 data
+        - Each sample uses different historical period
         """
-        print("\nPreparing training data...")
+        print("\nPreparing training data with rolling window approach...")
 
         # Get beverage features (static)
         beverage_features = self.create_beverage_features()  # Shape: (11,)
 
-        # Get 2018-2019 historical data (same for all samples)
-        hist_dates = self.df.index[self.df.index.year.isin([2018, 2019])]
-        hist_quantities = self.df.loc[hist_dates].values  # Shape: (24, 11)
-        hist_temporal = self.create_temporal_features(hist_dates).values  # Shape: (24, 5)
+        # Get all data
+        all_dates = self.df.index
+        all_quantities = self.df.values  # Shape: (36, 11)
+        all_temporal = self.create_temporal_features(all_dates).values  # Shape: (36, 5)
 
-        # Get 2020 target data
-        target_dates = self.df.index[self.df.index.year == 2020]
-        target_quantities_all = self.df.loc[target_dates].values  # Shape: (12, 11)
-
-        print(f"Historical data: 2018-2019 ({len(hist_dates)} months)")
-        print(f"Target data: 2020 ({len(target_dates)} months)")
-
-        # Normalize quantities
-        all_quantities = self.df.values
+        # Fit scalers on all data
         self.scaler_quantities.fit(all_quantities)
-
-        # Normalize temporal features
-        all_temporal = self.create_temporal_features(self.df.index).values
         self.scaler_temporal.fit(all_temporal)
 
-        # Normalize historical data (same for all samples)
-        hist_q_scaled = self.scaler_quantities.transform(hist_quantities)
-        hist_t_scaled = self.scaler_temporal.transform(hist_temporal)
-
-        # Process each target month
+        # Create rolling window samples
         X_train_list = []
         y_train_list = []
+        sample_dates = []
 
-        for target_date, target_q in zip(target_dates, target_quantities_all):
-            # Get target temporal features
-            target_t = self.create_temporal_features(pd.DatetimeIndex([target_date])).values[0]
-            target_t_scaled = self.scaler_temporal.transform(target_t.reshape(1, -1))[0]
-            target_q_scaled = self.scaler_quantities.transform(target_q.reshape(1, -1))[0]
+        # Create samples using rolling window
+        # For 36 months with window_size=24, we can create 36-24=12 samples
+        for i in range(len(all_dates) - window_size):
+            # Get window of historical data
+            hist_start = i
+            hist_end = i + window_size
+            target_idx = i + window_size
+
+            hist_quantities = all_quantities[hist_start:hist_end]  # Shape: (24, 11)
+            hist_temporal = all_temporal[hist_start:hist_end]      # Shape: (24, 5)
+            target_quantities = all_quantities[target_idx]          # Shape: (11,)
+            target_date = all_dates[target_idx]
+            target_temporal = all_temporal[target_idx]              # Shape: (5,)
+
+            # Normalize
+            hist_q_scaled = self.scaler_quantities.transform(hist_quantities)
+            hist_t_scaled = self.scaler_temporal.transform(hist_temporal)
+            target_q_scaled = self.scaler_quantities.transform(target_quantities.reshape(1, -1))[0]
+            target_t_scaled = self.scaler_temporal.transform(target_temporal.reshape(1, -1))[0]
 
             # Combine features for each historical month
             # [11 quantities, 5 temporal (hist), 11 is_diet] = 27 features per month
@@ -139,41 +139,46 @@ class LSTMBeverageForecaster:
             X_sample = np.array(hist_combined)  # Shape: (24, 27)
 
             # Broadcast target temporal features across all timesteps
-            target_t_broadcast = np.tile(target_t_scaled, (24, 1))  # Shape: (24, 5)
+            target_t_broadcast = np.tile(target_t_scaled, (window_size, 1))  # Shape: (24, 5)
             X_sample = np.concatenate([X_sample, target_t_broadcast], axis=1)  # Shape: (24, 32)
 
             X_train_list.append(X_sample)
             y_train_list.append(target_q_scaled)
+            sample_dates.append(target_date)
 
         X_train = np.array(X_train_list)  # Shape: (12, 24, 32)
         y_train = np.array(y_train_list)  # Shape: (12, 11)
 
-        print(f"Created {len(X_train_list)} training samples")
+        print(f"Created {len(X_train_list)} training samples using rolling window")
+        print(f"Window size: {window_size} months")
         print(f"X_train shape: {X_train.shape} (samples, timesteps, features)")
         print(f"y_train shape: {y_train.shape} (samples, beverages)")
+        print(f"Training date range: {sample_dates[0]} to {sample_dates[-1]}")
 
         # Store for later use
         self.X_train = X_train
         self.y_train = y_train
         self.beverage_features = beverage_features
-        self.test_dates = target_dates
+        self.test_dates = sample_dates
 
         return X_train, y_train
 
-    def build_model(self, lstm_units=64, dropout_rate=0.2):
-        """Build LSTM model"""
+    def build_model(self, lstm_units=32, dropout_rate=0.3):
+        """Build LSTM model with gradient clipping"""
         print("\nBuilding LSTM model...")
 
         # Input: (timesteps=24, features=32)
         # 32 features = 11 quantities + 5 temporal (hist) + 11 is_diet + 5 temporal (target)
         input_layer = layers.Input(shape=(24, 32))
 
-        # LSTM layers
+        # LSTM layers with reduced units to prevent overfitting
         x = layers.LSTM(lstm_units, return_sequences=True, dropout=dropout_rate)(input_layer)
-        x = layers.LSTM(lstm_units, return_sequences=False, dropout=dropout_rate)(x)
+        x = layers.LayerNormalization()(x)  # Add normalization
+        x = layers.LSTM(lstm_units // 2, return_sequences=False, dropout=dropout_rate)(x)
+        x = layers.LayerNormalization()(x)  # Add normalization
 
         # Dense layers to predict 1 month × 11 beverages = 11 values
-        x = layers.Dense(64, activation='relu')(x)
+        x = layers.Dense(32, activation='relu')(x)
         x = layers.Dropout(dropout_rate)(x)
         x = layers.Dense(11)(x)  # 11 outputs (one per beverage)
 
@@ -181,8 +186,14 @@ class LSTMBeverageForecaster:
 
         model = keras.Model(inputs=input_layer, outputs=output_layer)
 
+        # Use Adam with gradient clipping and lower learning rate
+        optimizer = keras.optimizers.Adam(
+            learning_rate=0.0001,
+            clipnorm=1.0  # Gradient clipping to prevent explosion
+        )
+
         model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=0.001),
+            optimizer=optimizer,
             loss='mse',
             metrics=['mae']
         )
@@ -192,22 +203,23 @@ class LSTMBeverageForecaster:
 
         return model
 
-    def train_model(self, epochs=500, batch_size=1, verbose=1):
+    def train_model(self, epochs=300, batch_size=4, verbose=1):
         """Train the LSTM model"""
         print("\nTraining model...")
 
         # Early stopping to prevent overfitting
         early_stop = keras.callbacks.EarlyStopping(
             monitor='loss',
-            patience=50,
-            restore_best_weights=True
+            patience=30,
+            restore_best_weights=True,
+            verbose=1
         )
 
         # Reduce learning rate on plateau
         reduce_lr = keras.callbacks.ReduceLROnPlateau(
             monitor='loss',
             factor=0.5,
-            patience=20,
+            patience=15,
             min_lr=0.00001,
             verbose=1
         )
@@ -441,10 +453,10 @@ def main():
     forecaster.prepare_training_data()
 
     # Build model
-    forecaster.build_model(lstm_units=64, dropout_rate=0.2)
+    forecaster.build_model(lstm_units=32, dropout_rate=0.3)
 
     # Train model
-    forecaster.train_model(epochs=500, verbose=1)
+    forecaster.train_model(epochs=300, batch_size=4, verbose=1)
 
     # Evaluate on 2020
     forecaster.evaluate_on_2020()

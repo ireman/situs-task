@@ -1,7 +1,7 @@
 """
-LSTM-based Beverage Order Forecasting
+Feedforward Neural Network for Beverage Order Forecasting
 Treats each month as a vector of 11 beverages (matrix approach)
-Uses LSTM to predict future months based on historical patterns
+Uses simple Dense layers (no recurrence) for stability with limited data
 """
 
 import pandas as pd
@@ -16,7 +16,7 @@ from tensorflow.keras import layers
 import warnings
 warnings.filterwarnings('ignore')
 
-class LSTMBeverageForecaster:
+class NNBeverageForecaster:
     def __init__(self, excel_path='monthly_beverage_orders 2018-2020.xlsx'):
         self.excel_path = excel_path
         self.df = None
@@ -86,8 +86,7 @@ class LSTMBeverageForecaster:
         """
         Prepare training data using rolling window approach:
         - Use sliding window of `window_size` months to predict next month
-        - Creates multiple samples from 2018-2020 data
-        - Each sample uses different historical period
+        - Flatten the window into a single vector for feedforward network
         """
         print("\nPreparing training data with rolling window approach...")
 
@@ -109,7 +108,6 @@ class LSTMBeverageForecaster:
         sample_dates = []
 
         # Create samples using rolling window
-        # For 36 months with window_size=24, we can create 36-24=12 samples
         for i in range(len(all_dates) - window_size):
             # Get window of historical data
             hist_start = i
@@ -128,33 +126,31 @@ class LSTMBeverageForecaster:
             target_q_scaled = self.scaler_quantities.transform(target_quantities.reshape(1, -1))[0]
             target_t_scaled = self.scaler_temporal.transform(target_temporal.reshape(1, -1))[0]
 
-            # Combine features for each historical month
-            # [11 quantities, 5 temporal (hist), 11 is_diet] = 27 features per month
-            hist_combined = []
-            for j in range(len(hist_q_scaled)):
-                month_features = np.concatenate([
-                    hist_q_scaled[j],      # 11 quantities
-                    hist_t_scaled[j],      # 5 temporal (historical)
-                    beverage_features      # 11 is_diet flags
-                ])
-                hist_combined.append(month_features)
+            # Flatten everything into a single vector for feedforward network
+            # Components:
+            # - Historical quantities: 24 × 11 = 264 values
+            # - Historical temporal: 24 × 5 = 120 values
+            # - Beverage features (is_diet): 11 values
+            # - Target temporal features: 5 values
+            # Total: 264 + 120 + 11 + 5 = 400 values
 
-            X_sample = np.array(hist_combined)  # Shape: (24, 27)
-
-            # Broadcast target temporal features across all timesteps
-            target_t_broadcast = np.tile(target_t_scaled, (window_size, 1))  # Shape: (24, 5)
-            X_sample = np.concatenate([X_sample, target_t_broadcast], axis=1)  # Shape: (24, 32)
+            X_sample = np.concatenate([
+                hist_q_scaled.flatten(),           # 264 values
+                hist_t_scaled.flatten(),           # 120 values
+                beverage_features,                 # 11 values
+                target_t_scaled                    # 5 values
+            ])
 
             X_train_list.append(X_sample)
             y_train_list.append(target_q_scaled)
             sample_dates.append(target_date)
 
-        X_train = np.array(X_train_list)  # Shape: (12, 24, 32)
+        X_train = np.array(X_train_list)  # Shape: (12, 400)
         y_train = np.array(y_train_list)  # Shape: (12, 11)
 
         print(f"Created {len(X_train_list)} training samples using rolling window")
         print(f"Window size: {window_size} months")
-        print(f"X_train shape: {X_train.shape} (samples, timesteps, features)")
+        print(f"X_train shape: {X_train.shape} (samples, flattened_features)")
         print(f"y_train shape: {y_train.shape} (samples, beverages)")
         print(f"Training date range: {sample_dates[0]} to {sample_dates[-1]}")
 
@@ -163,36 +159,34 @@ class LSTMBeverageForecaster:
         self.y_train = y_train
         self.beverage_features = beverage_features
         self.test_dates = sample_dates
+        self.window_size = window_size
 
         return X_train, y_train
 
-    def build_model(self, lstm_units=32, dropout_rate=0.3):
-        """Build LSTM model with gradient clipping"""
-        print("\nBuilding LSTM model...")
+    def build_model(self, hidden_units=[128, 64, 32], dropout_rate=0.3):
+        """Build feedforward neural network"""
+        print("\nBuilding feedforward neural network...")
 
-        # Input: (timesteps=24, features=32)
-        # 32 features = 11 quantities + 5 temporal (hist) + 11 is_diet + 5 temporal (target)
-        input_layer = layers.Input(shape=(24, 32))
+        # Input: flattened features (400 dimensions)
+        input_layer = layers.Input(shape=(400,))
 
-        # LSTM layers with reduced units to prevent overfitting
-        x = layers.LSTM(lstm_units, return_sequences=True, dropout=dropout_rate)(input_layer)
-        x = layers.LayerNormalization()(x)  # Add normalization
-        x = layers.LSTM(lstm_units // 2, return_sequences=False, dropout=dropout_rate)(x)
-        x = layers.LayerNormalization()(x)  # Add normalization
+        x = input_layer
 
-        # Dense layers to predict 1 month × 11 beverages = 11 values
-        x = layers.Dense(32, activation='relu')(x)
-        x = layers.Dropout(dropout_rate)(x)
-        x = layers.Dense(11)(x)  # 11 outputs (one per beverage)
+        # Hidden layers with batch normalization
+        for units in hidden_units:
+            x = layers.Dense(units, activation='relu')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.Dropout(dropout_rate)(x)
 
-        output_layer = x
+        # Output layer: 11 beverages
+        output_layer = layers.Dense(11)(x)
 
         model = keras.Model(inputs=input_layer, outputs=output_layer)
 
         # Use Adam with gradient clipping and lower learning rate
         optimizer = keras.optimizers.Adam(
-            learning_rate=0.0001,
-            clipnorm=1.0  # Gradient clipping to prevent explosion
+            learning_rate=0.001,
+            clipnorm=1.0  # Gradient clipping
         )
 
         model.compile(
@@ -206,14 +200,14 @@ class LSTMBeverageForecaster:
 
         return model
 
-    def train_model(self, epochs=300, batch_size=4, verbose=1):
-        """Train the LSTM model"""
+    def train_model(self, epochs=500, batch_size=4, verbose=1):
+        """Train the neural network"""
         print("\nTraining model...")
 
-        # Early stopping to prevent overfitting
+        # Early stopping
         early_stop = keras.callbacks.EarlyStopping(
             monitor='loss',
-            patience=30,
+            patience=50,
             restore_best_weights=True,
             verbose=1
         )
@@ -222,7 +216,7 @@ class LSTMBeverageForecaster:
         reduce_lr = keras.callbacks.ReduceLROnPlateau(
             monitor='loss',
             factor=0.5,
-            patience=15,
+            patience=20,
             min_lr=0.00001,
             verbose=1
         )
@@ -240,14 +234,14 @@ class LSTMBeverageForecaster:
 
         return history
 
-    def evaluate_on_2020(self):
-        """Evaluate model performance on 2020 predictions"""
-        print("\nEvaluating on 2020...")
+    def evaluate_model(self):
+        """Evaluate model performance on training data"""
+        print("\nEvaluating model...")
 
-        # Predict 2020 (we have 12 samples, one for each month)
-        y_pred_scaled = self.model.predict(self.X_train, verbose=0)  # Shape: (12, 11)
+        # Predict
+        y_pred_scaled = self.model.predict(self.X_train, verbose=0)
 
-        # Inverse transform to get actual quantities
+        # Inverse transform
         y_pred = self.scaler_quantities.inverse_transform(y_pred_scaled)
         y_true = self.scaler_quantities.inverse_transform(self.y_train)
 
@@ -256,7 +250,7 @@ class LSTMBeverageForecaster:
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         r2 = r2_score(y_true, y_pred)
 
-        print(f"2020 Evaluation Metrics:")
+        print(f"Evaluation Metrics:")
         print(f"  MAE: {mae:.2f}")
         print(f"  RMSE: {rmse:.2f}")
         print(f"  R²: {r2:.4f}")
@@ -268,7 +262,7 @@ class LSTMBeverageForecaster:
             print(f"  {bev}: {bev_mae:.2f}")
 
         # Store predictions
-        self.predictions_2020 = pd.DataFrame(
+        self.predictions = pd.DataFrame(
             y_pred,
             index=self.test_dates,
             columns=self.beverage_names
@@ -279,15 +273,14 @@ class LSTMBeverageForecaster:
     def prepare_inference_data(self):
         """
         Prepare inference data to predict 2021-2022:
-        - Use 2019-2020 (last 24 months) as historical input
+        - Use last 24 months (2019-2020) as historical input
         - Predict each month of 2021-2022 separately (24 predictions)
-        - Each prediction uses same historical data but different temporal features
         """
         print("\nPreparing inference data for 2021-2022...")
 
         # Get last 24 months (2019-2020)
-        inference_dates = self.df.index[self.df.index.year.isin([2019, 2020])]
-        X_inference_quantities = self.df.loc[inference_dates].values  # Shape: (24, 11)
+        inference_dates = self.df.index[-24:]
+        X_inference_quantities = self.df.iloc[-24:].values  # Shape: (24, 11)
         X_inference_temporal = self.create_temporal_features(inference_dates).values  # Shape: (24, 5)
 
         # Normalize
@@ -301,7 +294,7 @@ class LSTMBeverageForecaster:
         future_start = pd.Timestamp('2021-01-01')
         future_dates = pd.date_range(start=future_start, periods=24, freq='MS')
 
-        # For each future month, create a separate input with appropriate temporal features
+        # For each future month, create input vector
         X_inference_list = []
 
         for future_date in future_dates:
@@ -309,28 +302,19 @@ class LSTMBeverageForecaster:
             future_temporal = self.create_temporal_features(pd.DatetimeIndex([future_date])).values[0]
             future_temporal_scaled = self.scaler_temporal.transform(future_temporal.reshape(1, -1))[0]
 
-            # Combine features for each historical month
-            # [11 quantities, 5 temporal (hist), 11 is_diet] = 27 features
-            month_features_list = []
-            for i in range(len(X_inference_quantities_scaled)):
-                month_features = np.concatenate([
-                    X_inference_quantities_scaled[i],  # 11 quantities
-                    X_inference_temporal_scaled[i],    # 5 temporal (historical)
-                    beverage_features                  # 11 is_diet flags
-                ])
-                month_features_list.append(month_features)
-
-            X_sample = np.array(month_features_list)  # Shape: (24, 27)
-
-            # Broadcast target temporal features across all timesteps
-            target_t_broadcast = np.tile(future_temporal_scaled, (24, 1))  # Shape: (24, 5)
-            X_sample = np.concatenate([X_sample, target_t_broadcast], axis=1)  # Shape: (24, 32)
+            # Flatten into single vector (same structure as training)
+            X_sample = np.concatenate([
+                X_inference_quantities_scaled.flatten(),  # 264 values
+                X_inference_temporal_scaled.flatten(),    # 120 values
+                beverage_features,                        # 11 values
+                future_temporal_scaled                    # 5 values
+            ])
 
             X_inference_list.append(X_sample)
 
-        X_inference = np.array(X_inference_list)  # Shape: (24, 24, 32)
+        X_inference = np.array(X_inference_list)  # Shape: (24, 400)
 
-        print(f"X_inference shape: {X_inference.shape} (future_months, timesteps, features)")
+        print(f"X_inference shape: {X_inference.shape} (future_months, flattened_features)")
 
         self.X_inference = X_inference
         self.future_dates = future_dates
@@ -341,8 +325,8 @@ class LSTMBeverageForecaster:
         """Generate forecasts for 2021-2022"""
         print("\nGenerating forecasts for 2021-2022...")
 
-        # Predict for each future month (24 predictions, one per month)
-        y_pred_scaled = self.model.predict(self.X_inference, verbose=0)  # Shape: (24, 11)
+        # Predict
+        y_pred_scaled = self.model.predict(self.X_inference, verbose=0)
 
         # Inverse transform
         y_pred = self.scaler_quantities.inverse_transform(y_pred_scaled)
@@ -361,7 +345,7 @@ class LSTMBeverageForecaster:
 
         return forecasts_df
 
-    def save_forecasts(self, output_path='lstm_forecasts_2021_2022.csv'):
+    def save_forecasts(self, output_path='nn_forecasts_2021_2022.csv'):
         """Save forecasts to CSV"""
         # Reshape to long format
         forecasts_long = []
@@ -392,13 +376,13 @@ class LSTMBeverageForecaster:
         for idx, beverage in enumerate(self.beverage_names):
             ax = axes[idx]
 
-            # Historical data (2018-2020)
+            # Historical data (all available)
             historical = self.df[beverage]
             ax.plot(historical.index, historical.values, 'o-', label='Historical', linewidth=2)
 
-            # 2020 predictions
-            pred_2020 = self.predictions_2020[beverage]
-            ax.plot(pred_2020.index, pred_2020.values, 's-', label='2020 Prediction', linewidth=2, alpha=0.7)
+            # Training predictions
+            pred = self.predictions[beverage]
+            ax.plot(pred.index, pred.values, 's-', label='Training Pred', linewidth=2, alpha=0.7)
 
             # 2021-2022 forecasts
             forecast = self.forecasts_2021_2022[beverage]
@@ -414,9 +398,9 @@ class LSTMBeverageForecaster:
         fig.delaxes(axes[-1])
 
         plt.tight_layout()
-        plt.savefig('lstm_forecasts_visualization.png', dpi=300, bbox_inches='tight')
-        print("Visualization saved to lstm_forecasts_visualization.png")
-        plt.show()
+        plt.savefig('nn_forecasts_visualization.png', dpi=300, bbox_inches='tight')
+        print("Visualization saved to nn_forecasts_visualization.png")
+        plt.close()
 
         # Training history
         if hasattr(self, 'history'):
@@ -435,34 +419,34 @@ class LSTMBeverageForecaster:
             ax2.grid(True, alpha=0.3)
 
             plt.tight_layout()
-            plt.savefig('lstm_training_history.png', dpi=300, bbox_inches='tight')
-            print("Training history saved to lstm_training_history.png")
-            plt.show()
+            plt.savefig('nn_training_history.png', dpi=300, bbox_inches='tight')
+            print("Training history saved to nn_training_history.png")
+            plt.close()
 
 
 def main():
     """Main execution function"""
     print("=" * 70)
-    print("LSTM-based Beverage Order Forecasting")
+    print("Feedforward Neural Network - Beverage Order Forecasting")
     print("=" * 70)
 
     # Initialize forecaster
-    forecaster = LSTMBeverageForecaster()
+    forecaster = NNBeverageForecaster()
 
     # Load and preprocess data
     forecaster.load_and_preprocess()
 
-    # Prepare training data (2018-2019 → 2020)
-    forecaster.prepare_training_data()
+    # Prepare training data
+    forecaster.prepare_training_data(window_size=24)
 
     # Build model
-    forecaster.build_model(lstm_units=32, dropout_rate=0.3)
+    forecaster.build_model(hidden_units=[128, 64, 32], dropout_rate=0.3)
 
     # Train model
-    forecaster.train_model(epochs=300, batch_size=4, verbose=1)
+    forecaster.train_model(epochs=500, batch_size=4, verbose=1)
 
-    # Evaluate on 2020
-    forecaster.evaluate_on_2020()
+    # Evaluate
+    forecaster.evaluate_model()
 
     # Prepare inference data and generate forecasts for 2021-2022
     forecaster.prepare_inference_data()
@@ -475,7 +459,7 @@ def main():
     forecaster.visualize_results()
 
     print("\n" + "=" * 70)
-    print("LSTM Forecasting Complete!")
+    print("Feedforward NN Forecasting Complete!")
     print("=" * 70)
 
 

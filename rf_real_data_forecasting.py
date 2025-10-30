@@ -167,34 +167,53 @@ class RealDataForecaster:
 
         return self.X_train, self.y_train
 
-    def train_model(self, model_type='random_forest'):
-        """Train Random Forest or Gradient Boosting model"""
-        print(f"\nTraining {model_type} model...")
+    def train_model(self, model_type='random_forest', validation_split=0.2):
+        """Train Random Forest or Gradient Boosting model with time-based validation"""
+        print(f"\nTraining {model_type} model with validation...")
+
+        # Time-based split: use first 80% for training, last 20% for validation
+        split_idx = int(len(self.X_train) * (1 - validation_split))
+        X_train_split = self.X_train[:split_idx]
+        y_train_split = self.y_train[:split_idx]
+        X_val_split = self.X_train[split_idx:]
+        y_val_split = self.y_train[split_idx:]
+
+        print(f"Training samples: {len(X_train_split)}")
+        print(f"Validation samples: {len(X_val_split)}")
 
         if model_type == 'random_forest':
             self.model = RandomForestRegressor(
-                n_estimators=200,
-                max_depth=15,
-                min_samples_split=5,
-                min_samples_leaf=2,
+                n_estimators=100,
+                max_depth=8,  # Reduced from 15
+                min_samples_split=10,  # Increased from 5
+                min_samples_leaf=4,  # Increased from 2
+                max_features='sqrt',  # Added regularization
                 random_state=42,
                 n_jobs=-1,
                 verbose=0
             )
         elif model_type == 'gradient_boosting':
             self.model = GradientBoostingRegressor(
-                n_estimators=200,
-                max_depth=5,
-                learning_rate=0.1,
-                min_samples_split=5,
-                min_samples_leaf=2,
+                n_estimators=100,  # Reduced from 200
+                max_depth=3,  # Reduced from 5
+                learning_rate=0.05,  # Reduced from 0.1
+                min_samples_split=10,  # Increased from 5
+                min_samples_leaf=4,  # Increased from 2
+                subsample=0.8,  # Added regularization
                 random_state=42,
                 verbose=0
             )
         else:
             raise ValueError(f"Unknown model_type: {model_type}")
 
-        self.model.fit(self.X_train, self.y_train)
+        # Fit on training split
+        self.model.fit(X_train_split, y_train_split)
+
+        # Store validation split for evaluation
+        self.X_val = X_val_split
+        self.y_val = y_val_split
+        self.X_train_only = X_train_split
+        self.y_train_only = y_train_split
 
         # Feature importance
         feature_importance = pd.DataFrame({
@@ -208,21 +227,46 @@ class RealDataForecaster:
         return self.model
 
     def evaluate_model(self):
-        """Evaluate model on training data"""
-        print("\nEvaluating model on training data...")
+        """Evaluate model on both training and validation data"""
+        print("\nEvaluating model...")
 
-        y_pred = self.model.predict(self.X_train)
+        # Training metrics
+        y_train_pred = self.model.predict(self.X_train_only)
+        train_mae = mean_absolute_error(self.y_train_only, y_train_pred)
+        train_rmse = np.sqrt(mean_squared_error(self.y_train_only, y_train_pred))
+        train_r2 = r2_score(self.y_train_only, y_train_pred)
 
-        mae = mean_absolute_error(self.y_train, y_pred)
-        rmse = np.sqrt(mean_squared_error(self.y_train, y_pred))
-        r2 = r2_score(self.y_train, y_pred)
+        # Validation metrics
+        y_val_pred = self.model.predict(self.X_val)
+        val_mae = mean_absolute_error(self.y_val, y_val_pred)
+        val_rmse = np.sqrt(mean_squared_error(self.y_val, y_val_pred))
+        val_r2 = r2_score(self.y_val, y_val_pred)
 
         print(f"Training Metrics:")
-        print(f"  MAE:  {mae:.2f}")
-        print(f"  RMSE: {rmse:.2f}")
-        print(f"  R²:   {r2:.4f}")
+        print(f"  MAE:  {train_mae:.2f}")
+        print(f"  RMSE: {train_rmse:.2f}")
+        print(f"  R²:   {train_r2:.4f}")
 
-        return {'mae': mae, 'rmse': rmse, 'r2': r2}
+        print(f"\nValidation Metrics:")
+        print(f"  MAE:  {val_mae:.2f}")
+        print(f"  RMSE: {val_rmse:.2f}")
+        print(f"  R²:   {val_r2:.4f}")
+
+        print(f"\nOverfitting Check:")
+        print(f"  MAE gap (val - train): {val_mae - train_mae:.2f}")
+        print(f"  R² gap (train - val): {train_r2 - val_r2:.4f}")
+
+        if train_r2 - val_r2 > 0.3:
+            print("  ⚠️  WARNING: Significant overfitting detected!")
+        elif train_r2 - val_r2 > 0.15:
+            print("  ⚠️  Moderate overfitting")
+        else:
+            print("  ✓ Model appears well-regularized")
+
+        return {
+            'train_mae': train_mae, 'train_rmse': train_rmse, 'train_r2': train_r2,
+            'val_mae': val_mae, 'val_rmse': val_rmse, 'val_r2': val_r2
+        }
 
     def generate_forecasts(self, start_year=2021, end_year=2022):
         """
@@ -396,8 +440,9 @@ def main():
 
     print("\n" + "=" * 70)
     print("Forecasting complete!")
-    print(f"Model: Gradient Boosting")
-    print(f"MAE: {metrics['mae']:.2f}, RMSE: {metrics['rmse']:.2f}, R²: {metrics['r2']:.4f}")
+    print(f"Model: Gradient Boosting (with proper validation)")
+    print(f"Training   - MAE: {metrics['train_mae']:.2f}, R²: {metrics['train_r2']:.4f}")
+    print(f"Validation - MAE: {metrics['val_mae']:.2f}, R²: {metrics['val_r2']:.4f}")
     print("=" * 70)
 
 

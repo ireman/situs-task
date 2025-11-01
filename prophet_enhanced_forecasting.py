@@ -388,6 +388,9 @@ class EnhancedProphetForecaster:
             last_hist_date = hist.index.max()
             ax.axvline(x=last_hist_date, color='gray', linestyle=':', alpha=0.5, linewidth=2)
 
+            # Set x-axis limits to stop at Dec 2022 (no extension to 2023)
+            ax.set_xlim(hist.index.min(), forecast_dates.max())
+
             ax.set_title(beverage, fontsize=10, fontweight='bold')
             ax.set_xlabel('Date')
             ax.set_ylabel('Quantity')

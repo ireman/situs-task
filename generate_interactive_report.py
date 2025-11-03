@@ -37,7 +37,6 @@ def main():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prophet Forecasting Results - Interactive Dashboard</title>
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {{
             margin: 0;
@@ -285,11 +284,11 @@ def main():
         </div>
 
         <div class="tabs">
-            <button class="tab-button active" onclick="showTab('overview')">📊 Overview</button>
-            <button class="tab-button" onclick="showTab('comparison')">📈 Model Comparison</button>
-            <button class="tab-button" onclick="showTab('enhanced')">⭐ Enhanced Forecasts</button>
-            <button class="tab-button" onclick="showTab('basic')">📉 Basic Forecasts</button>
-            <button class="tab-button" onclick="showTab('charts')">📷 Visual Analysis</button>
+            <button class="tab-button active" onclick="showTab('overview', this)">📊 Overview</button>
+            <button class="tab-button" onclick="showTab('comparison', this)">📈 Model Comparison</button>
+            <button class="tab-button" onclick="showTab('enhanced', this)">⭐ Enhanced Forecasts</button>
+            <button class="tab-button" onclick="showTab('basic', this)">📉 Basic Forecasts</button>
+            <button class="tab-button" onclick="showTab('charts', this)">📷 Visual Analysis</button>
         </div>
 
         <!-- Overview Tab -->
@@ -433,8 +432,8 @@ def main():
         const enhancedData = {enhanced_json};
         const basicData = {basic_json};
 
-        // Tab switching
-        function showTab(tabName) {{
+        // Tab switching - FIXED
+        function showTab(tabName, button) {{
             const tabs = document.querySelectorAll('.tab-content');
             const buttons = document.querySelectorAll('.tab-button');
 
@@ -442,24 +441,31 @@ def main():
             buttons.forEach(btn => btn.classList.remove('active'));
 
             document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
+            button.classList.add('active');
         }}
 
         // Initialize on load
-        window.onload = function() {{
+        window.addEventListener('DOMContentLoaded', function() {{
+            console.log('Page loaded, initializing...');
+            console.log('Comparison data:', comparisonData);
+            console.log('Enhanced data:', enhancedData);
+            console.log('Basic data:', basicData);
+
             initializeOverview();
             initializeComparison();
             initializeEnhanced();
             initializeBasic();
-        }};
+        }});
 
         function initializeOverview() {{
+            console.log('Initializing overview...');
+
             // Calculate overall metrics
             const avgBasicMAE = comparisonData.reduce((sum, row) => sum + row.basic_mae, 0) / comparisonData.length;
             const avgEnhancedMAE = comparisonData.reduce((sum, row) => sum + row.enhanced_mae, 0) / comparisonData.length;
             const avgBasicMAPE = comparisonData.reduce((sum, row) => sum + row.basic_mape, 0) / comparisonData.length;
             const avgEnhancedMAPE = comparisonData.reduce((sum, row) => sum + row.enhanced_mape, 0) / comparisonData.length;
-            const avgImprovement = comparisonData.reduce((sum, row) => sum + row.mae_improvement_%, 0) / comparisonData.length;
+            const avgImprovement = comparisonData.reduce((sum, row) => sum + row['mae_improvement_%'], 0) / comparisonData.length;
 
             const metricsHTML = `
                 <div class="stats-grid">
@@ -490,9 +496,9 @@ def main():
 
             // Improvement heatmap
             const beverages = comparisonData.map(row => row.beverage);
-            const maeImp = comparisonData.map(row => row.mae_improvement_%);
-            const rmseImp = comparisonData.map(row => row.rmse_improvement_%);
-            const mapeImp = comparisonData.map(row => row.mape_improvement_%);
+            const maeImp = comparisonData.map(row => row['mae_improvement_%']);
+            const rmseImp = comparisonData.map(row => row['rmse_improvement_%']);
+            const mapeImp = comparisonData.map(row => row['mape_improvement_%']);
 
             const heatmapTrace = {{
                 z: [maeImp, rmseImp, mapeImp],
@@ -526,6 +532,8 @@ def main():
         }}
 
         function initializeComparison() {{
+            console.log('Initializing comparison...');
+
             const beverages = comparisonData.map(row => row.beverage);
 
             // MAE Chart
@@ -587,12 +595,12 @@ def main():
             // Improvement Chart
             const improvementTrace = {{
                 x: beverages,
-                y: comparisonData.map(row => row.mae_improvement_%),
+                y: comparisonData.map(row => row['mae_improvement_%']),
                 type: 'bar',
                 marker: {{
-                    color: comparisonData.map(row => row.mae_improvement_% > 0 ? '#27ae60' : '#e74c3c')
+                    color: comparisonData.map(row => row['mae_improvement_%'] > 0 ? '#27ae60' : '#e74c3c')
                 }},
-                text: comparisonData.map(row => row.mae_improvement_%.toFixed(1) + '%'),
+                text: comparisonData.map(row => row['mae_improvement_%'].toFixed(1) + '%'),
                 textposition: 'outside'
             }};
 
@@ -632,18 +640,18 @@ def main():
             `;
 
             comparisonData.forEach(row => {{
-                const maeClass = row.mae_improvement_% > 0 ? 'highlight-improved' : 'highlight-degraded';
-                const mapeClass = row.mape_improvement_% > 0 ? 'highlight-improved' : 'highlight-degraded';
+                const maeClass = row['mae_improvement_%'] > 0 ? 'highlight-improved' : 'highlight-degraded';
+                const mapeClass = row['mape_improvement_%'] > 0 ? 'highlight-improved' : 'highlight-degraded';
 
                 tableHTML += `
                     <tr>
                         <td><strong>${{row.beverage}}</strong></td>
                         <td>${{row.basic_mae.toFixed(3)}}</td>
                         <td>${{row.enhanced_mae.toFixed(3)}}</td>
-                        <td class="${{maeClass}}">${{row.mae_improvement_%.toFixed(1)}}%</td>
+                        <td class="${{maeClass}}">${{row['mae_improvement_%'].toFixed(1)}}%</td>
                         <td>${{row.basic_mape.toFixed(1)}}%</td>
                         <td>${{row.enhanced_mape.toFixed(1)}}%</td>
-                        <td class="${{mapeClass}}">${{row.mape_improvement_%.toFixed(1)}}%</td>
+                        <td class="${{mapeClass}}">${{row['mape_improvement_%'].toFixed(1)}}%</td>
                     </tr>
                 `;
             }});
@@ -657,6 +665,8 @@ def main():
         }}
 
         function initializeEnhanced() {{
+            console.log('Initializing enhanced...');
+
             // Populate beverage selector
             const beverages = [...new Set(enhancedData.map(row => row.beverage))];
             const select = document.getElementById('enhancedBeverageSelect');
@@ -715,6 +725,8 @@ def main():
         }}
 
         function initializeBasic() {{
+            console.log('Initializing basic...');
+
             // Populate beverage selector
             const beverages = [...new Set(basicData.map(row => row.beverage))];
             const select = document.getElementById('basicBeverageSelect');
